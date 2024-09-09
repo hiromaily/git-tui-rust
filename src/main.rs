@@ -1,56 +1,115 @@
+use anyhow::{anyhow, Result};
+use git2::{BranchType, Repository};
+use std::env;
+
+fn get_branches(repo_path: &str) -> Result<Vec<String>> {
+    let repo = Repository::open(repo_path)?;
+    let branches = repo
+        .branches(Some(BranchType::Local))?
+        .filter_map(|branch| branch.ok())
+        .filter_map(|(branch, _)| branch.name().ok().flatten().map(|s| s.to_string()))
+        .collect();
+    Ok(branches)
+}
+
+fn checkout_branch(repo_path: &str, branch_name: &str) -> Result<()> {
+    let repo = Repository::open(repo_path)?;
+    let (object, reference) = repo.revparse_ext(branch_name)?;
+    repo.checkout_tree(&object, None)?;
+    if let Some(gref) = reference {
+        repo.set_head(gref.name().unwrap())?;
+    } else {
+        repo.set_head_detached(object.id())?;
+    }
+    Ok(())
+}
+
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event as CEvent, KeyCode},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use git2::Repository;
-use std::{
-    error::Error,
-    io,
-    time::{Duration, Instant},
-};
-use tui::{
+use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::Span,
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem},
     Terminal,
 };
+use std::{io, time::Duration};
+use tokio::{sync::mpsc, task};
 
-enum Event<I> {
-    Input(I),
-    Tick,
-}
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 現在のディレクトリを取得
+    let repo_path_buf = env::current_dir()?;
+    let repo_path = repo_path_buf
+        .to_str()
+        .ok_or_else(|| anyhow!("Failed to convert path to string"))?;
 
-fn main() -> Result<(), Box<dyn Error>> {
-    // ターミナルをrawモードに設定
+    // ブランチ一覧を取得
+    let branches = get_branches(repo_path)?;
+
+    // ターミナルの初期化
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let tick_rate = Duration::from_millis(200);
-    let rx = start_event_loop(tick_rate);
+    // チャネルを使ってユーザーインプットを非同期に処理
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    task::spawn(async move {
+        loop {
+            if event::poll(Duration::from_millis(10)).unwrap() {
+                if let Event::Key(key) = event::read().unwrap() {
+                    tx.send(key).unwrap();
+                }
+            }
+        }
+    });
 
-    let repo = Repository::open(".")?; // カレントディレクトリでリポジトリを開く
-    let mut app = App::new(repo);
-
-    // メインループ
+    // ブランチのリストを表示
+    let mut selected_index = 0;
     loop {
-        terminal.draw(|f| ui(f, &app))?;
+        terminal.draw(|f| {
+            let size = f.area(); // size を area に変更
+            let block = Block::default().title("Branches").borders(Borders::ALL);
+            let branch_items: Vec<ListItem> = branches
+                .iter()
+                .map(|b| ListItem::new(Span::raw(b)))
+                .collect();
+            let list = List::new(branch_items)
+                .block(block)
+                .highlight_style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .highlight_symbol(">> ");
+            f.render_widget(list, size);
+        })?;
 
-        match rx.recv()? {
-            Event::Input(event) => match event {
+        if let Some(event) = rx.recv().await {
+            match event.code {
                 KeyCode::Char('q') => break,
-                KeyCode::Down => app.next(),
-                KeyCode::Up => app.previous(),
-                KeyCode::Enter => app.checkout_selected()?,
+                #[allow(clippy::implicit_saturating_sub)]
+                KeyCode::Up => {
+                    if selected_index > 0 {
+                        selected_index -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    if selected_index < branches.len() - 1 {
+                        selected_index += 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    let branch_name = &branches[selected_index];
+                    checkout_branch(repo_path, branch_name)?;
+                }
                 _ => {}
-            },
-            Event::Tick => {}
+            }
         }
     }
 
@@ -64,131 +123,4 @@ fn main() -> Result<(), Box<dyn Error>> {
     terminal.show_cursor()?;
 
     Ok(())
-}
-
-struct App<'a> {
-    branches: Vec<String>,
-    selected: usize,
-    repo: Repository,
-    message: Option<Span<'a>>,
-}
-
-impl<'a> App<'a> {
-    fn new(repo: Repository) -> Self {
-        let branches = get_branches(&repo).unwrap_or_else(|_| vec![]);
-        Self {
-            branches,
-            selected: 0,
-            repo,
-            message: None,
-        }
-    }
-
-    fn next(&mut self) {
-        if self.selected < self.branches.len() - 1 {
-            self.selected += 1;
-        }
-    }
-
-    fn previous(&mut self) {
-        if self.selected > 0 {
-            self.selected -= 1;
-        }
-    }
-
-    fn checkout_selected(&mut self) -> Result<(), git2::Error> {
-        if let Some(branch) = self.branches.get(self.selected) {
-            let (object, reference) = self.repo.revparse_ext(branch)?;
-            self.repo.checkout_tree(&object, None)?;
-            if let Some(ref_name) = reference.and_then(|r| r.name().map(|name| name.to_string())) {
-                self.repo.set_head(&ref_name)?;
-                self.message = Some(Span::styled(
-                    format!("Switched to branch '{}'", branch),
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                ));
-            }
-        }
-        Ok(())
-    }
-}
-
-fn get_branches(repo: &Repository) -> Result<Vec<String>, git2::Error> {
-    let mut branches = Vec::new();
-    let branches_iter = repo.branches(Some(git2::BranchType::Local))?;
-    for branch in branches_iter {
-        let (branch, _) = branch?;
-        if let Some(name) = branch.name()? {
-            branches.push(name.to_string());
-        }
-    }
-    Ok(branches)
-}
-
-fn start_event_loop(tick_rate: Duration) -> std::sync::mpsc::Receiver<Event<KeyCode>> {
-    use std::sync::mpsc;
-    use std::thread;
-
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        let mut last_tick = Instant::now();
-        loop {
-            let timeout = tick_rate
-                .checked_sub(last_tick.elapsed())
-                .unwrap_or_else(|| Duration::from_secs(0));
-            if event::poll(timeout).expect("Polling failed") {
-                if let CEvent::Key(key) = event::read().expect("Reading event failed") {
-                    tx.send(Event::Input(key.code))
-                        .expect("Sending input event failed");
-                }
-            }
-            if last_tick.elapsed() >= tick_rate {
-                tx.send(Event::Tick).expect("Sending tick event failed");
-                last_tick = Instant::now();
-            }
-        }
-    });
-    rx
-}
-
-fn ui<B: tui::backend::Backend>(f: &mut tui::Frame<B>, app: &App) {
-    let size = f.size();
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(2)
-        .constraints(
-            [
-                Constraint::Percentage(80),
-                Constraint::Percentage(10),
-                Constraint::Percentage(10),
-            ]
-            .as_ref(),
-        )
-        .split(size);
-
-    let branch_list: Vec<ListItem> = app
-        .branches
-        .iter()
-        .map(|b| ListItem::new(b.clone()))
-        .collect();
-
-    let branches = List::new(branch_list)
-        .block(Block::default().borders(Borders::ALL).title("Branches"))
-        .highlight_style(Style::default().bg(Color::Blue));
-
-    let message = if let Some(msg) = &app.message {
-        Paragraph::new(msg.clone()).block(Block::default().borders(Borders::ALL).title("Message"))
-    } else {
-        Paragraph::new("").block(Block::default().borders(Borders::ALL).title("Message"))
-    };
-
-    f.render_widget(branches, chunks[0]);
-    f.render_widget(
-        Paragraph::new(format!("Selected Branch: {}", app.branches[app.selected]))
-            .block(Block::default().borders(Borders::ALL).title("Info")),
-        chunks[1],
-    );
-    f.render_widget(message, chunks[2]);
 }

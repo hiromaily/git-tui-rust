@@ -51,4 +51,8 @@ release-build:
 
 .PHONY: install-bin
 install-bin:
-	sudo cp target/release/git-tui-rust /usr/local/bin/git-tui
+	sudo cp target/release/git_tui_rust /usr/local/bin/git-tui
+
+.PHONY: uninstall
+uninstall:
+	sodo rm -rf /usr/local/bin/git-tui
