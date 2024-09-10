@@ -25,4 +25,4 @@ Cargo.lock
 /target
 
 # Project specific
-app.log
+*.log
