@@ -1,6 +1,7 @@
 use crate::git;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
+use log::debug;
 use tokio::sync::mpsc::UnboundedSender;
 
 pub async fn handle_events(tx: UnboundedSender<Event>) {
@@ -8,6 +9,7 @@ pub async fn handle_events(tx: UnboundedSender<Event>) {
         if event::poll(std::time::Duration::from_millis(10)).unwrap() {
             if let Event::Key(key) = event::read().unwrap() {
                 tx.send(Event::Key(key)).unwrap();
+                debug!("Key event sent: {:?}", key);
             }
         }
     }
@@ -22,6 +24,7 @@ pub fn process_event(
     current_branch: &mut String,
 ) -> Result<bool> {
     if let Event::Key(event) = event {
+        debug!("Processing key event: {:?}", event.code);
         match event.code {
             KeyCode::Char('q') => return Ok(true),
             KeyCode::Up => {

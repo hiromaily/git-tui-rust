@@ -1,6 +1,6 @@
 // lib.rsの代わりにこのmain.rsにuse文をまとめても良い
 use anyhow::{anyhow, Result};
-use log::info;
+use log::{debug, info};
 use tokio::{sync::mpsc, task};
 
 // local
@@ -17,17 +17,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let repo_path = repo_path_buf
         .to_str()
         .ok_or_else(|| anyhow!("Failed to convert path to string"))?;
+    debug!("Current directory: {:?}", repo_path);
 
     // ブランチ一覧、現在のブランチを取得
     let branches = git::get_branches(repo_path)?;
     let mut current_branch = git::get_current_branch(repo_path)?;
+    debug!("Branches: {:?}", branches);
+    debug!("Current branch: {:?}", current_branch);
 
     // ターミナル初期化
     let (mut terminal, alternate_screen) = terminal::init()?;
+    info!("Terminal initialized.");
 
     // チャネルを使ってユーザーインプットを非同期に処理
     let (tx, mut rx) = mpsc::unbounded_channel();
     let handle = task::spawn(input::handle_events(tx));
+    info!("Input handler task spawned.");
 
     // メッセージ変数
     let mut message = String::new();
@@ -58,6 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ターミナル終了処理
     terminal::terminate(&mut terminal, alternate_screen)?;
+    info!("Terminal terminated.");
 
     // 非同期タスクをキャンセルして安全に終了する
     handle.abort(); // タスクを中断する
@@ -66,6 +72,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("Error while awaiting handle: {:?}", err);
         }
     }
+    info!("Input handler task completed.");
+    info!("Exiting main function.");
 
     Ok(())
 }
