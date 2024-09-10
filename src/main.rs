@@ -8,17 +8,16 @@ use log::{error, info};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
-    text::Span,
-    widgets::{Block, Borders, List, ListItem, Paragraph},
     Terminal,
 };
 use std::env;
 use std::{io, process, time::Duration};
 use tokio::{sync::mpsc, task};
 
-//local
+// local
 use git_tui_rust::{git, logger};
+mod widgets;
+use widgets::{draw_branches_list, draw_help_paragraph, draw_message_paragraph};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -78,43 +77,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .split(size);
 
-            // ブランチ名とその強調表示を準備
-            let branch_items: Vec<ListItem> = branches
-                .iter()
-                .enumerate()
-                .map(|(i, b)| {
-                    let mut branch_name = b.clone();
-                    if b == &current_branch {
-                        branch_name = format!("* {}", b);
-                    }
-                    if i == selected_index {
-                        ListItem::new(Span::styled(
-                            branch_name,
-                            Style::default()
-                                .fg(Color::Yellow)
-                                .add_modifier(Modifier::BOLD),
-                        ))
-                    } else {
-                        ListItem::new(Span::raw(branch_name))
-                    }
-                })
-                .collect();
+            // ブランチリストのウィジェットを描画
+            let branches_list = draw_branches_list(&branches, &current_branch, selected_index);
+            f.render_widget(branches_list, chunks[0]);
 
-            // ブランチリストのウィジェットを作成
-            let list = List::new(branch_items)
-                .block(Block::default().title("Branches").borders(Borders::ALL))
-                .highlight_symbol(">> ");
-            f.render_widget(list, chunks[0]);
+            // メッセージ用のウィジェットを描画
+            let message_paragraph = draw_message_paragraph(&message);
+            f.render_widget(message_paragraph, chunks[1]);
 
-            // メッセージ用のウィジェットを作成
-            let message_block = Paragraph::new(message.clone())
-                .block(Block::default().title("Message").borders(Borders::ALL));
-            f.render_widget(message_block, chunks[1]);
-
-            // 操作方法のメッセージを作成
-            let help_message =
-                Paragraph::new("Press 'q' to exit.").block(Block::default().borders(Borders::ALL));
-            f.render_widget(help_message, chunks[2]);
+            // 操作方法のウィジェットを描画
+            let help_paragraph = draw_help_paragraph();
+            f.render_widget(help_paragraph, chunks[2]);
         })?;
 
         if let Some(event) = rx.recv().await {
@@ -168,6 +141,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     terminal.show_cursor()?;
 
     process::exit(0); // プログラム自体を終了させる
-
-    //Ok(())
 }
