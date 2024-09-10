@@ -5,6 +5,8 @@ use log::debug;
 use tokio::sync::mpsc::UnboundedSender;
 
 pub async fn handle_events(tx: UnboundedSender<Event>) {
+    debug!("handle_events(tx): {:?}", tx);
+
     loop {
         if event::poll(std::time::Duration::from_millis(10)).unwrap() {
             if let Event::Key(key) = event::read().unwrap() {

@@ -1,8 +1,10 @@
 use anyhow::{anyhow, Result};
 use git2::{BranchType, Repository};
+use log::debug;
 
-// get git all branches
+// Get git all branches
 pub fn get_branches(repo_path: &str) -> Result<Vec<String>> {
+    debug!("get_branches(repo_path): {:?}", repo_path);
     let repo = Repository::open(repo_path)?;
     let branches = repo
         .branches(Some(BranchType::Local))?
@@ -12,8 +14,12 @@ pub fn get_branches(repo_path: &str) -> Result<Vec<String>> {
     Ok(branches)
 }
 
-// switch git branch to another
+// Switch git branch to another
 pub fn checkout_branch(repo_path: &str, branch_name: &str) -> Result<()> {
+    debug!(
+        "checkout_branch(repo_path,branch_name: {:?}, {:?}",
+        repo_path, branch_name
+    );
     let repo = Repository::open(repo_path)?;
     let (object, reference) = repo.revparse_ext(branch_name)?;
     repo.checkout_tree(&object, None)?;
@@ -25,8 +31,9 @@ pub fn checkout_branch(repo_path: &str, branch_name: &str) -> Result<()> {
     Ok(())
 }
 
-// get current branch
+// Get current branch name
 pub fn get_current_branch(repo_path: &str) -> Result<String> {
+    debug!("get_current_branch(repo_path): {:?}", repo_path);
     let repo = Repository::open(repo_path)?;
     let head = repo.head()?;
     let shorthand = head

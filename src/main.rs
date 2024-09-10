@@ -10,20 +10,20 @@ use git_tui_rust::{git, input, logger, terminal, ui};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Logger
     logger::init();
-    info!("start main()");
+    info!("Start main()");
 
     // 現在のディレクトリを取得
     let repo_path_buf = std::env::current_dir()?;
     let repo_path = repo_path_buf
         .to_str()
         .ok_or_else(|| anyhow!("Failed to convert path to string"))?;
-    debug!("Current directory: {:?}", repo_path);
+    debug!("Current directory: {:?}", repo_path); // e.g. /~/git-tui-rust
 
     // ブランチ一覧、現在のブランチを取得
     let branches = git::get_branches(repo_path)?;
     let mut current_branch = git::get_current_branch(repo_path)?;
-    debug!("Branches: {:?}", branches);
-    debug!("Current branch: {:?}", current_branch);
+    debug!("Branches: {:?}", branches); // ["dev", "main"]
+    debug!("Current branch: {:?}", current_branch); // "dev"
 
     // ターミナル初期化
     let (mut terminal, alternate_screen) = terminal::init()?;

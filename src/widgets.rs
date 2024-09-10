@@ -4,7 +4,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
-// ブランチリストを描画する関数
+// Draw git branch list
 pub fn draw_branches_list<'a>(
     branches: &'a [String],
     current_branch: &'a str,
@@ -36,13 +36,13 @@ pub fn draw_branches_list<'a>(
         .highlight_symbol(">> ")
 }
 
-// メッセージを描画する関数
+// Draw messages
 pub fn draw_message_paragraph(message: &str) -> Paragraph {
     Paragraph::new(message.to_string())
         .block(Block::default().title("Message").borders(Borders::ALL))
 }
 
-// 操作方法を描画する関数
+// Draw help message
 pub fn draw_help_paragraph<'a>() -> Paragraph<'a> {
     Paragraph::new("Press 'q' to exit.").block(Block::default().borders(Borders::ALL))
 }

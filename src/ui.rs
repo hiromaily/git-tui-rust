@@ -1,4 +1,5 @@
 use crate::widgets;
+use log::debug;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
@@ -13,6 +14,8 @@ pub fn draw(
     message: &str,
     selected_index: usize,
 ) -> Result<(), io::Error> {
+    debug!("ui::draw()");
+
     terminal
         .draw(|f| {
             let size = f.area();
