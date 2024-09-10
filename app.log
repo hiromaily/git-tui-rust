@@ -1,3 +1,0 @@
-2024-09-09T14:11:21.276391Z [INFO] hogehoge
-2024-09-09T14:11:21.291506Z [TRACE] (12) mio::poll: [/Users/hiroki.yasui/.local/share/cargo/registry/src/index.crates.io-6f17d22bba15001f/mio-1.0.2/src/poll.rs:569] registering event source with poller: token=Token(0), interests=READABLE
-2024-09-09T14:11:21.291702Z [TRACE] (12) mio::poll: [/Users/hiroki.yasui/.local/share/cargo/registry/src/index.crates.io-6f17d22bba15001f/mio-1.0.2/src/poll.rs:569] registering event source with poller: token=Token(1), interests=READABLE

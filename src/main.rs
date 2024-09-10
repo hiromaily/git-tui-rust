@@ -1,46 +1,31 @@
 use anyhow::{anyhow, Result};
-use git2::{BranchType, Repository};
-use std::env;
-
-fn get_branches(repo_path: &str) -> Result<Vec<String>> {
-    let repo = Repository::open(repo_path)?;
-    let branches = repo
-        .branches(Some(BranchType::Local))?
-        .filter_map(|branch| branch.ok())
-        .filter_map(|(branch, _)| branch.name().ok().flatten().map(|s| s.to_string()))
-        .collect();
-    Ok(branches)
-}
-
-fn checkout_branch(repo_path: &str, branch_name: &str) -> Result<()> {
-    let repo = Repository::open(repo_path)?;
-    let (object, reference) = repo.revparse_ext(branch_name)?;
-    repo.checkout_tree(&object, None)?;
-    if let Some(gref) = reference {
-        repo.set_head(gref.name().unwrap())?;
-    } else {
-        repo.set_head_detached(object.id())?;
-    }
-    Ok(())
-}
-
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use log::{error, info};
 use ratatui::{
     backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::Span,
-    widgets::{Block, Borders, List, ListItem},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
     Terminal,
 };
-use std::{io, time::Duration};
+use std::env;
+use std::{io, process, time::Duration};
 use tokio::{sync::mpsc, task};
+
+//local
+use git_tui_rust::{git, logger};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Logger
+    logger::init();
+    info!("start main()");
+
     // 現在のディレクトリを取得
     let repo_path_buf = env::current_dir()?;
     let repo_path = repo_path_buf
@@ -48,7 +33,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or_else(|| anyhow!("Failed to convert path to string"))?;
 
     // ブランチ一覧を取得
-    let branches = get_branches(repo_path)?;
+    let branches = git::get_branches(repo_path)?;
+
+    // 現在のブランチを取得
+    let mut current_branch = git::get_current_branch(repo_path)?;
 
     // ターミナルの初期化
     enable_raw_mode()?;
@@ -69,30 +57,71 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // メッセージ用の変数
+    let mut message = String::new();
+
     // ブランチのリストを表示
     let mut selected_index = 0;
     loop {
         terminal.draw(|f| {
-            let size = f.area(); // size を area に変更
-            let block = Block::default().title("Branches").borders(Borders::ALL);
+            let size = f.area(); // 修正された部分: size -> area
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .margin(1)
+                .constraints(
+                    [
+                        Constraint::Percentage(68), // 上部にブランチリスト
+                        Constraint::Percentage(22), // 中央部にメッセージ表示用
+                        Constraint::Percentage(10), // 下部に操作方法を表示
+                    ]
+                    .as_ref(),
+                )
+                .split(size);
+
+            // ブランチ名とその強調表示を準備
             let branch_items: Vec<ListItem> = branches
                 .iter()
-                .map(|b| ListItem::new(Span::raw(b)))
+                .enumerate()
+                .map(|(i, b)| {
+                    let mut branch_name = b.clone();
+                    if b == &current_branch {
+                        branch_name = format!("* {}", b);
+                    }
+                    if i == selected_index {
+                        ListItem::new(Span::styled(
+                            branch_name,
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        ))
+                    } else {
+                        ListItem::new(Span::raw(branch_name))
+                    }
+                })
                 .collect();
+
+            // ブランチリストのウィジェットを作成
             let list = List::new(branch_items)
-                .block(block)
-                .highlight_style(
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                )
+                .block(Block::default().title("Branches").borders(Borders::ALL))
                 .highlight_symbol(">> ");
-            f.render_widget(list, size);
+            f.render_widget(list, chunks[0]);
+
+            // メッセージ用のウィジェットを作成
+            let message_block = Paragraph::new(message.clone())
+                .block(Block::default().title("Message").borders(Borders::ALL));
+            f.render_widget(message_block, chunks[1]);
+
+            // 操作方法のメッセージを作成
+            let help_message =
+                Paragraph::new("Press 'q' to exit.").block(Block::default().borders(Borders::ALL));
+            f.render_widget(help_message, chunks[2]);
         })?;
 
         if let Some(event) = rx.recv().await {
             match event.code {
-                KeyCode::Char('q') => break,
+                KeyCode::Char('q') => {
+                    break;
+                }
                 #[allow(clippy::implicit_saturating_sub)]
                 KeyCode::Up => {
                     if selected_index > 0 {
@@ -106,7 +135,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 KeyCode::Enter => {
                     let branch_name = &branches[selected_index];
-                    checkout_branch(repo_path, branch_name)?;
+                    if branch_name == &current_branch {
+                        message = format!("This is the current branch: {}", branch_name);
+                        info!("This is the current branch: {}", branch_name);
+                    } else {
+                        match git::checkout_branch(repo_path, branch_name) {
+                            Ok(_) => {
+                                current_branch = git::get_current_branch(repo_path)?;
+                                message = format!("Branch was changed to: {}", current_branch);
+                                info!("Branch was changed to: {}", current_branch);
+                            }
+                            Err(e) => {
+                                message =
+                                    format!("Failed to checkout branch {}: {}", branch_name, e);
+                                error!("Failed to checkout branch {}: {}", branch_name, e);
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -122,5 +167,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     terminal.show_cursor()?;
 
-    Ok(())
+    process::exit(0); // プログラム自体を終了させる
+
+    //Ok(())
 }
